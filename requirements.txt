@@ -2,6 +2,7 @@
 pyqt6
 spacy
 pdfplumber
+PyPDF2
 python-docx
 striprtf
 odfpy
