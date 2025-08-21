@@ -1,0 +1,12 @@
+# Requirements for SNF Coding Assistant Desktop App
+pyqt6
+spacy
+pdfplumber
+python-docx
+striprtf
+odfpy
+beautifulsoup4
+reportlab
+llama-cpp-python
+scikit-learn
+requests
