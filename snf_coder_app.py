@@ -494,7 +494,6 @@ class LoginDialog(QDialog):
         self.user = QLineEdit()
         self.user.setPlaceholderText("Username" if self.cfg.get("mode")=="local" else "DOMAIN\\username  or  user@domain.tld")
         self.user.setClearButtonEnabled(True)
-        # Prefill with local creds for speed in local mode
         if self.cfg.get("mode")=="local":
             self.user.setText(self.cfg.get("local_user",""))
 
@@ -521,19 +520,16 @@ class LoginDialog(QDialog):
 
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.ok = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
-        shead = self.ok  # alias
-        shead.setText("Login")
-        shead.setAutoDefault(True)
-        shead.setDefault(True)
+        self.ok.setText("Login")
+        self.ok.setAutoDefault(True)
+        self.ok.setDefault(True)
         v.addWidget(self.buttons)
 
-        # Keyboard flow
         self.user.returnPressed.connect(self.focus_pw)
         self.pw.returnPressed.connect(self.try_login)
         self.buttons.accepted.connect(self.try_login)
         self.buttons.rejected.connect(self.reject)
 
-        # ESC to cancel
         QShortcut(QKeySequence("Escape"), self, activated=self.reject)
 
         self.user.setFocus()
@@ -553,7 +549,7 @@ class LoginDialog(QDialog):
                 ts = time.strftime("%Y-%m-%d %H:%M:%S")
                 f.write(f"{ts}\tmode={self.cfg.get('mode')}\tuser={username}\tresult={'OK' if ok else 'FAIL'}\n")
         except Exception:
-            pass  # best-effort only
+            pass
 
     def try_login(self):
         if self._attempts >= self._max_attempts:
@@ -588,129 +584,71 @@ class LoginDialog(QDialog):
             return
 
         self.accept()
-# -------------------------
-# Login Dialog (keyboard-first)
-# -------------------------
-from PyQt6.QtWidgets import QDialog, QDialogButtonBox
-from PyQt6.QtGui import QKeySequence
-from PyQt6.QtWidgets import QShortcut
-
-class LoginDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Secure Login")
-        self.setMinimumWidth(420)
-
-        v = QVBoxLayout(self)
-        v.addWidget(QLabel(
-            "Enter your credentials and press ENTER.\n"
-            "Current mode: LOCAL (edit data/login_config.json to change).\n"
-            "Default: username '12' / password '34'."
-        ))
-
-        self.user = QLineEdit()
-        self.user.setPlaceholderText("Username")
-        self.user.setText(CONFIG.get("local_user", ""))
-        v.addWidget(self.user)
-
-        pw_row = QHBoxLayout()
-        self.pw = QLineEdit()
-        self.pw.setPlaceholderText("Password")
-        self.pw.setEchoMode(QLineEdit.EchoMode.Password)
-        self.pw.setText(CONFIG.get("local_password", ""))
-        self.show_pw = QCheckBox("Show")
-        self.show_pw.stateChanged.connect(
-            lambda s: self.pw.setEchoMode(
-                QLineEdit.EchoMode.Normal if s == Qt.CheckState.Checked.value
-                else QLineEdit.EchoMode.Password
-            )
-        )
-        pw_row.addWidget(self.pw, 1)
-        pw_row.addWidget(self.show_pw, 0)
-        v.addLayout(pw_row)
-
-        self.msg = QLabel("")
-        self.msg.setStyleSheet("color:#a00;")
-        v.addWidget(self.msg)
-
-        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Login")
-        v.addWidget(self.buttons)
-
-        # Keyboard flow
-        self.user.returnPressed.connect(self.pw.setFocus)
-        self.pw.returnPressed.connect(self.try_login)
-        self.buttons.accepted.connect(self.try_login)
-        self.buttons.rejected.connect(self.reject)
-        QShortcut(QKeySequence("Escape"), self, activated=self.reject)
-
-        self.user.setFocus()
-
-    def try_login(self):
-        u = self.user.text().strip()
-        p = self.pw.text()
-        if not u or not p:
-            self.msg.setText("Username and password required.")
-            return
-        if validate_login(u, p):
-            self.accept()
-        else:
-            self.msg.setText("Invalid credentials. Try again.")
-            self.pw.clear()
-            self.pw.setFocus()
-
-
-# -------------------------
-# Main Window (basic, clean)
-# -------------------------
-from PyQt6.QtWidgets import QListWidget, QPlainTextEdit, QSplitter, QSizePolicy
-
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("SNF Coding Assistant")
-        self.resize(1200, 780)
+        self.resize(1280, 820)
+        self.setAcceptDrops(True)
 
-        self.current_path = None
-        self.current_text = ""
-        self.findings = []
+        self.current_path: Optional[str] = None
+        self.current_text: str = ""
+        self.current_source: str = ""
+        self.current_doc_name: str = ""
+        self.analysis: Optional[Analysis] = None
+        self.markdown: str = ""
+        self.worker: Optional[WorkerAnalyze] = None
 
         # Top bar
         top = QHBoxLayout()
-        self.btn_open = QPushButton("Open")
+        self.btn_open = QPushButton("Open…")
+        self.btn_sample = QPushButton("Open Sample")
         self.btn_analyze = QPushButton("Analyze")
-        self.btn_export = QPushButton("Export PDF")
-        self.theme = QComboBox()
-        self.theme.addItems(["Light", "Dark"])
+        self.btn_export = QPushButton("Export PDF…")
         top.addWidget(self.btn_open)
+        top.addWidget(self.btn_sample)
         top.addWidget(self.btn_analyze)
         top.addWidget(self.btn_export)
         top.addStretch(1)
+        top.addWidget(QLabel("Facility:"))
+        self.input_facility = QLineEdit()
+        self.input_facility.setPlaceholderText("Facility name")
+        self.input_facility.setFixedWidth(200)
+        top.addWidget(self.input_facility)
+        top.addSpacing(8)
+        top.addWidget(QLabel("Patient ID:"))
+        self.input_patient = QLineEdit()
+        self.input_patient.setPlaceholderText("ID")
+        self.input_patient.setFixedWidth(140)
+        top.addWidget(self.input_patient)
+        top.addSpacing(16)
         top.addWidget(QLabel("Theme:"))
+        self.theme = QComboBox()
+        self.theme.addItems(["Light", "Dark", "Slate Mint"])
         top.addWidget(self.theme)
 
-        # Body: left file list / right text + report
+        # Body
         self.files = QListWidget()
+        self.files.setSelectionMode(self.files.SelectionMode.SingleSelection)
         self.text_view = QPlainTextEdit()
         self.text_view.setReadOnly(True)
-        self.report_view = QPlainTextEdit()
+        self.report_view = QTextEdit()
         self.report_view.setReadOnly(True)
 
         right = QSplitter(Qt.Orientation.Vertical)
         right.addWidget(self.text_view)
         right.addWidget(self.report_view)
-        right.setSizes([500, 280])
+        right.setSizes([520, 300])
 
         split = QSplitter(Qt.Orientation.Horizontal)
         split.addWidget(self.files)
         split.addWidget(right)
-        split.setSizes([280, 900])
+        split.setSizes([320, 960])
+        self.splitter = split
 
-        # Status + progress
         self.progress = QProgressBar()
         self.progress.setValue(0)
 
-        # Central layout
         central = QWidget()
         lay = QVBoxLayout(central)
         lay.addLayout(top)
@@ -718,33 +656,96 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.progress)
         self.setCentralWidget(central)
 
+        self.status = QStatusBar()
+        self.setStatusBar(self.status)
+
         # Signals
         self.btn_open.clicked.connect(self.open_file)
+        self.btn_sample.clicked.connect(self.open_sample)
         self.btn_analyze.clicked.connect(self.run_analysis)
-        self.btn_export.clicked.connect(self.export_pdf)
+        self.btn_export.clicked.connect(self.do_export_pdf)
         self.files.itemSelectionChanged.connect(self.pick_from_list)
         self.theme.currentTextChanged.connect(self.apply_theme)
+
+        # Restore settings
+        self.settings = QSettings(ORG_NAME, APP_NAME)
+        geom = self.settings.value("window/geometry", None)
+        if geom:
+            self.restoreGeometry(geom)
+        state = self.settings.value("window/state", None)
+        if state:
+            self.restoreState(state)
+        self.input_facility.setText(self.settings.value("meta/facility", ""))
+        self.input_patient.setText(self.settings.value("meta/patient", ""))
+        theme_name = self.settings.value("ui/theme", "Light")
+        idx = self.theme.findText(theme_name)
+        self.theme.setCurrentIndex(idx if idx >= 0 else 0)
         self.apply_theme(self.theme.currentText())
 
-    # --- Theme ---
-    def apply_theme(self, which):
+    # Window lifecycle
+    def closeEvent(self, event):
+        self.settings.setValue("window/geometry", self.saveGeometry())
+        self.settings.setValue("window/state", self.saveState())
+        self.settings.setValue("meta/facility", self.input_facility.text())
+        self.settings.setValue("meta/patient", self.input_patient.text())
+        self.settings.setValue("ui/theme", self.theme.currentText())
+        super().closeEvent(event)
+
+    # Drag & Drop
+    def dragEnterEvent(self, e: QDragEnterEvent):
+        if e.mimeData().hasUrls():
+            e.acceptProposedAction()
+        else:
+            e.ignore()
+
+    def dropEvent(self, e: QDropEvent):
+        urls = [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
+        if not urls:
+            return
+        for p in urls:
+            if p and p not in [self.files.item(i).text() for i in range(self.files.count())]:
+                self.files.addItem(p)
+        self.load_path(urls[0])
+
+    # Theme
+    def apply_theme(self, which: str):
         if which == "Dark":
-            self.setStyleSheet("""
+            self.setStyleSheet(
+                """
                 QWidget { background:#2d2d30; color:#e6e6e6; }
                 QPlainTextEdit, QTextEdit, QListWidget { background:#1e1e1e; color:#e6e6e6; border:1px solid #444; }
                 QPushButton { background:#3c3c3c; border:1px solid #555; padding:6px; }
                 QPushButton:hover { background:#454545; }
                 QProgressBar { background:#3c3c3c; border:1px solid #555; }
                 QProgressBar::chunk { background:#007acc; }
-            """)
+                """
+            )
+        elif which == "Slate Mint":
+            self.setStyleSheet(
+                """
+                QWidget { background:#f3f6f7; color:#1e2a2f; }
+                QPlainTextEdit, QTextEdit, QListWidget { background:#ffffff; color:#1e2a2f; border:1px solid #c8d7da; }
+                QPushButton { background:#e0f2ef; color:#0e5d4f; border:1px solid #a6d8cf; padding:6px; border-radius:4px; }
+                QPushButton:hover { background:#c9ece6; }
+                QProgressBar { background:#e9f2f4; border:1px solid #c8d7da; }
+                QProgressBar::chunk { background:#2bb39a; }
+                QStatusBar { background:#e9f2f4; border-top:1px solid #c8d7da; }
+                """
+            )
         else:
             self.setStyleSheet("")
 
-    # --- File open ---
+    # File handling
+    def open_sample(self):
+        self.load_path(SAMPLE_TXT_PATH)
+
     def open_file(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open Document",
-            "", "All Supported (*.txt *.pdf *.docx *.rtf *.html *.htm);;Text (*.txt);;PDF (*.pdf);;Word (*.docx);;RTF (*.rtf);;HTML (*.html *.htm)"
+            self,
+            "Open Document",
+            "",
+            "All Supported (*.txt *.pdf *.docx *.rtf *.odt *.html *.htm);;"
+            "Text (*.txt);;PDF (*.pdf);;Word (*.docx);;RTF (*.rtf);;ODT (*.odt);;HTML (*.html *.htm)",
         )
         if not path:
             return
@@ -758,36 +759,74 @@ class MainWindow(QMainWindow):
             return
         self.load_path(items[0].text())
 
-    def load_path(self, path):
+    def load_path(self, path: str):
         self.current_path = path
+        self.current_doc_name = os.path.basename(path)
         self.progress.setValue(10)
-        self.current_text = parse_file(path)
+        text, src = extract_text_from_path(path)
+        self.current_text, self.current_source = text, src
         self.text_view.setPlainText(self.current_text)
-        self.report_view.setPlainText("Ready. Click Analyze.")
+        self.report_view.setMarkdown("Ready. Click Analyze.")
         self.progress.setValue(20)
+        self.status.showMessage(f"Loaded {self.current_doc_name} ({src})", 3000)
 
-    # --- Analyze ---
+    # Analyze (background)
     def run_analysis(self):
-        if not self.current_text.strip():
+        if not self.current_path:
             QMessageBox.information(self, "Analyze", "Open a document first.")
             return
-        self.progress.setValue(30)
-        self.findings = analyze_text(self.current_text)
-        self.progress.setValue(70)
-        report = "Coding Findings:\n\n" + "\n".join(self.findings)
-        self.report_view.setPlainText(report)
-        self.progress.setValue(100)
+        if self.worker and self.worker.isRunning():
+            QMessageBox.information(self, "Analyze", "Analysis already running.")
+            return
+        self.progress.setValue(0)
+        self.status.showMessage("Analyzing…")
+        self.worker = WorkerAnalyze(self.current_path)
+        self.worker.progress.connect(self.on_progress)
+        self.worker.finished_ok.connect(self.on_analysis_ok)
+        self.worker.finished_err.connect(self.on_analysis_err)
+        self.worker.start()
 
-    # --- Export ---
-    def export_pdf(self):
-        if not self.findings:
+    def on_progress(self, pct: int, msg: str):
+        self.progress.setValue(pct)
+        if msg:
+            self.status.showMessage(msg)
+
+    def on_analysis_ok(self, payload: object, doc_name: str):
+        try:
+            analysis, text, md = payload
+        except Exception:
+            QMessageBox.critical(self, "Analysis", "Unexpected analysis payload.")
+            return
+        self.analysis = analysis
+        self.current_text = text
+        self.current_doc_name = doc_name
+        self.markdown = md
+        self.text_view.setPlainText(self.current_text)
+        self.report_view.setMarkdown(self.markdown)
+        self.progress.setValue(100)
+        self.status.showMessage("Analysis complete.", 3000)
+
+    def on_analysis_err(self, err: str):
+        self.progress.setValue(0)
+        QMessageBox.critical(self, "Analysis Error", err)
+        self.status.clearMessage()
+
+    # Export
+    def do_export_pdf(self):
+        if not self.analysis:
             QMessageBox.information(self, "Export", "Nothing to export. Analyze first.")
             return
         out, _ = QFileDialog.getSaveFileName(self, "Save PDF", "report.pdf", "PDF (*.pdf)")
         if not out:
             return
+        meta = {
+            "facility": self.input_facility.text(),
+            "patient_id": self.input_patient.text(),
+            "doc_name": self.current_doc_name or "(unknown)",
+            "datetime": time.strftime("%Y-%m-%d %H:%M"),
+        }
         try:
-            export_report(self.findings, out)
+            export_pdf(self.analysis, out, meta)
             QMessageBox.information(self, "Export", f"Saved: {out}")
         except Exception as e:
             QMessageBox.critical(self, "Export Error", str(e))
